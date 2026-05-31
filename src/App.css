@@ -1,0 +1,331 @@
+html,
+body,
+#root {
+    height: 100%;
+    overflow: hidden;
+    --github-accent-color: #3a4a59;
+    --github-checkmark-bg: #ffffff;
+    --github-checkmark-color: #000000;
+    --github-focus-color: var(--github-accent-color);
+    --github-input-focus-color: #ffffff;
+    --framer-color-tint: var(--github-focus-color);
+}
+
+body {
+    scrollbar-width: none;
+}
+
+body::-webkit-scrollbar {
+    display: none;
+}
+
+main {
+    display: flex;
+    flex-direction: column;
+    align-items: start;
+    padding: 0 15px 15px;
+    height: 100%;
+    gap: 15px;
+
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+form {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    gap: 10px;
+}
+
+hr {
+    width: 100%;
+}
+
+.setup {
+    align-items: center;
+    height: auto;
+    padding: 15px;
+}
+
+.intro {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    text-align: center;
+    max-width: 190px;
+    gap: 15px;
+    padding: 15px 0;
+}
+
+.intro h2 {
+    line-height: 1;
+    font-size: 1em;
+    margin: 0 0 10px;
+}
+
+.intro p {
+    margin: 0;
+    color: var(--framer-color-text-tertiary);
+    line-height: 1.35;
+    text-wrap: balance;
+}
+
+.intro a {
+    display: inline-block;
+    margin-top: 10px;
+    color: var(--framer-color-text-tertiary);
+    text-decoration: none;
+    text-wrap: balance;
+}
+
+.logo {
+    color: var(--framer-color-text-tertiary);
+    background-color: var(--framer-color-bg-tertiary);
+    border-radius: 8px;
+    width: 30px;
+    height: 30px;
+}
+
+.logo img {
+    display: block;
+    border-radius: 8px;
+}
+
+.username-field {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.field-setup {
+    padding-top: 15px;
+    padding-bottom: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+.field-setup::-webkit-scrollbar {
+    display: none;
+}
+
+.field-setup form {
+    height: 100%;
+}
+
+.slug-field {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    gap: 10px;
+    color: var(--framer-color-text-tertiary);
+}
+
+.slug-field select {
+    width: 100%;
+}
+
+.fields {
+    display: grid;
+    grid-template-columns: minmax(110px, 1fr) 8px minmax(110px, 1fr);
+    gap: 8px;
+    margin-bottom: auto;
+    padding-bottom: 10px;
+    align-items: center;
+    color: var(--framer-color-text-tertiary);
+}
+
+.fields-column {
+    grid-column: span 2 / span 2;
+}
+
+.source-field {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: left;
+    white-space: nowrap;
+    overflow: hidden;
+    font-weight: 500;
+    background-color: var(--framer-color-bg-tertiary);
+    gap: 8px;
+}
+
+.checkmark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
+    color: var(--github-checkmark-color);
+    background-color: var(--github-checkmark-bg);
+    font-size: 10px;
+    line-height: 1;
+}
+
+.source-field.ignored .checkmark {
+    background-color: var(--framer-color-bg-secondary);
+}
+
+.source-field span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.source-field:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--framer-color-tint);
+}
+
+.source-field:disabled {
+    opacity: 1;
+}
+
+.source-field.ignored {
+    opacity: 0.45;
+}
+
+.map-arrow {
+    color: var(--framer-color-text-tertiary);
+    font-size: 18px;
+    line-height: 1;
+}
+
+.fields input[type="text"] {
+    width: 100%;
+}
+
+.fields input[type="text"]:disabled {
+    opacity: 0.55;
+}
+
+.username-input {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    height: 30px;
+    padding: 0 8px;
+    border-radius: 8px;
+    background-color: var(--framer-color-bg-tertiary);
+    color: var(--framer-color-text-tertiary);
+}
+
+.username-input:focus-within {
+    box-shadow: inset 0 0 0 1px var(--framer-color-tint);
+}
+
+.repo-input:focus-within {
+    box-shadow: inset 0 0 0 1px var(--github-input-focus-color);
+}
+
+.username-input input {
+    min-width: 0;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.username-input input:focus {
+    box-shadow: none;
+}
+
+.status-panel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 34px;
+    padding: 8px;
+    border-radius: 8px;
+    line-height: 1.35;
+}
+
+.neutral-panel {
+    color: var(--framer-color-text-secondary);
+    background-color: var(--framer-color-bg-secondary);
+}
+
+.error-panel {
+    flex-direction: column;
+    align-items: flex-start;
+    color: var(--framer-color-text);
+    background-color: var(--framer-color-bg-secondary);
+}
+
+.error-panel > span {
+    color: #c00;
+}
+
+.error-panel button {
+    width: auto;
+}
+
+footer {
+    margin-top: auto;
+    width: 100%;
+    font-size: 11px;
+}
+
+.field-footer {
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background-color: var(--framer-color-bg);
+    padding-bottom: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.field-footer::before {
+    content: "";
+    position: absolute;
+    top: -24px;
+    left: 0;
+    width: 100%;
+    height: 24px;
+    background: linear-gradient(to bottom, transparent, var(--framer-color-bg));
+    pointer-events: none;
+}
+
+button {
+    transition:
+        background-color 0.2s ease,
+        color 0.2s ease,
+        opacity 0.2s ease;
+}
+
+button:disabled {
+    pointer-events: none;
+}
+
+@media (prefers-color-scheme: light) {
+    html,
+    body,
+    #root {
+        --github-checkmark-bg: #000000;
+        --github-checkmark-color: #ffffff;
+        --github-input-focus-color: #000000;
+    }
+}

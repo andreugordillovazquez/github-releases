@@ -1,0 +1,6 @@
+{
+    "id": "28f4a7",
+    "name": "GitHub Releases",
+    "modes": ["configureManagedCollection", "syncManagedCollection"],
+    "icon": "/plugin-icon.svg"
+}
