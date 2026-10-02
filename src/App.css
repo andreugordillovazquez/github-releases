@@ -7,7 +7,6 @@ body,
     --github-checkmark-bg: #ffffff;
     --github-checkmark-color: #000000;
     --github-focus-color: var(--github-accent-color);
-    --github-input-focus-color: #ffffff;
     --framer-color-tint: var(--github-focus-color);
 }
 
@@ -233,7 +232,7 @@ hr {
 }
 
 .repo-input:focus-within {
-    box-shadow: inset 0 0 0 1px var(--github-input-focus-color);
+    box-shadow: inset 0 0 0 1px var(--framer-color-text);
 }
 
 .username-input input {
@@ -326,6 +325,5 @@ button:disabled {
     #root {
         --github-checkmark-bg: #000000;
         --github-checkmark-color: #ffffff;
-        --github-input-focus-color: #000000;
     }
 }
