@@ -1,7 +1,7 @@
 import "./App.css"
 
-import { FramerPluginClosedError, framer, type ManagedCollection, useIsAllowedTo } from "framer-plugin"
-import { type FormEvent, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { FramerPluginClosedError, framer, type ManagedCollection, useIsAllowedTo } from "@framer/plugin"
+import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { FIELD_IDS, type ReleaseFieldConfig } from "./fields"
 import {
     type GitHubRelease,
@@ -24,6 +24,7 @@ type Step = "repo" | "fields"
 type Status = "idle" | "fetching" | "syncing" | "error"
 
 const REPO_SCREEN_FALLBACK_HEIGHT = 287
+const CLOSE_WARNING_MESSAGE = "GitHub releases are still syncing. Close anyway?"
 
 export function App({
     collection,
@@ -54,6 +55,14 @@ export function App({
     const isBusy = status === "fetching" || status === "syncing"
     const canSubmitRepo = Boolean(parsedRepo) && isAllowedToSync && !isBusy
     const canSyncFields = Boolean(repo) && isAllowedToSync && !isBusy
+
+    useEffect(() => {
+        void setCloseWarning(isBusy)
+
+        return () => {
+            if (isBusy) void setCloseWarning(false)
+        }
+    }, [isBusy])
 
     useLayoutEffect(() => {
         const isFieldStep = step === "fields"
@@ -247,6 +256,16 @@ export function App({
             </form>
         </main>
     )
+}
+
+async function setCloseWarning(isEnabled: boolean) {
+    try {
+        await framer.setCloseWarning(isEnabled ? CLOSE_WARNING_MESSAGE : false)
+    } catch (error) {
+        if (error instanceof FramerPluginClosedError) return
+
+        console.error(error)
+    }
 }
 
 function parseInitialRepo(repoUrl: string | null): RepoInfo | null {
