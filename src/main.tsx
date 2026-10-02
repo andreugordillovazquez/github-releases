@@ -7,6 +7,7 @@ import { App } from "./App"
 import { parseFieldConfigs } from "./fields"
 import {
     GitHubRequestTimeoutError,
+    ManagedCollectionWriteError,
     PLUGIN_DATA_KEYS,
     SYNC_METHODS,
     parseSlugStrategy,
@@ -87,7 +88,7 @@ async function syncExistingCollection(
         console.error(error)
         await setSyncCloseWarning(false)
         framer.closePlugin(
-            error instanceof GitHubRequestTimeoutError
+            error instanceof GitHubRequestTimeoutError || error instanceof ManagedCollectionWriteError
                 ? error.message
                 : "Could not sync GitHub releases. Reconfigure the collection and try again.",
             {

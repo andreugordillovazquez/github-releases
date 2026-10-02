@@ -1,5 +1,7 @@
 import DOMPurify from "dompurify"
 import {
+    FramerPluginClosedError,
+    FramerPluginError,
     type FieldDataEntryInput,
     type FieldDataInput,
     type ManagedCollection,
@@ -43,6 +45,17 @@ export class GitHubRequestTimeoutError extends Error {
     constructor(cause: unknown) {
         super("GitHub did not respond in time. Check your connection and try again.", { cause })
         this.name = "GitHubRequestTimeoutError"
+    }
+}
+
+export class ManagedCollectionWriteError extends Error {
+    constructor(operation: string, cause: unknown) {
+        const message =
+            cause instanceof FramerPluginError
+                ? `Framer denied permission to ${operation}. Check your CMS access and try syncing again.`
+                : `Could not ${operation} in this CMS collection. Try syncing again.`
+        super(message, { cause })
+        this.name = "ManagedCollectionWriteError"
     }
 }
 
@@ -204,7 +217,7 @@ export async function syncReleaseData(
         throw new Error(`No releases found for ${repo.fullName}. No collection items were changed.`)
     }
 
-    await configureReleasesCollection(collection, fieldConfigs)
+    await writeCollection("update collection fields", () => configureReleasesCollection(collection, fieldConfigs))
     const existingItemIds = new Set(await collection.getItemIds())
     const usedSlugs = new Set<string>()
     const latestReleaseId = releases.find(release => !release.draft && !release.prerelease)?.id
@@ -223,19 +236,38 @@ export async function syncReleaseData(
         return item
     })
 
-    await collection.addItems(items)
-    await collection.removeItems(Array.from(existingItemIds))
+    await writeCollection("add release items", () => collection.addItems(items))
+    await writeCollection("remove outdated release items", () => collection.removeItems(Array.from(existingItemIds)))
 
-    await collection.setPluginData(PLUGIN_DATA_KEYS.REPO_URL, repo.url)
-    await collection.setPluginData(PLUGIN_DATA_KEYS.REPO_FULL_NAME, repo.fullName)
-    await collection.setPluginData(PLUGIN_DATA_KEYS.FIELD_CONFIGS, serializeFieldConfigs(fieldConfigs))
-    await collection.setPluginData(PLUGIN_DATA_KEYS.SLUG_STRATEGY, slugStrategy)
-    await collection.setPluginData(PLUGIN_DATA_KEYS.LAST_SYNCED_AT, new Date().toISOString())
-    await collection.setPluginData(PLUGIN_DATA_KEYS.LAST_RELEASE_COUNT, String(releases.length))
+    await writeCollection("save the repository URL", () => collection.setPluginData(PLUGIN_DATA_KEYS.REPO_URL, repo.url))
+    await writeCollection("save the repository name", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.REPO_FULL_NAME, repo.fullName)
+    )
+    await writeCollection("save field settings", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.FIELD_CONFIGS, serializeFieldConfigs(fieldConfigs))
+    )
+    await writeCollection("save the slug setting", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.SLUG_STRATEGY, slugStrategy)
+    )
+    await writeCollection("save the last sync time", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.LAST_SYNCED_AT, new Date().toISOString())
+    )
+    await writeCollection("save the release count", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.LAST_RELEASE_COUNT, String(releases.length))
+    )
 
     return {
         repo,
         releaseCount: releases.length,
+    }
+}
+
+async function writeCollection(operation: string, write: () => Promise<unknown>): Promise<void> {
+    try {
+        await write()
+    } catch (error) {
+        if (error instanceof FramerPluginClosedError) throw error
+        throw new ManagedCollectionWriteError(operation, error)
     }
 }
 

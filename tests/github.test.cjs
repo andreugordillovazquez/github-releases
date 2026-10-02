@@ -1,10 +1,26 @@
 const assert = require("node:assert/strict")
-const test = require("node:test")
+const { before, test } = require("node:test")
 const jiti = require("jiti")(process.cwd() + "/")
 const { createDefaultFieldConfigs, parseFieldConfigs } = jiti("./src/fields.ts")
-const { fetchGitHubReleases, parseRepoInput, syncReleaseData, syncReleases } = jiti("./src/github.ts")
+let fetchGitHubReleases
+let parseRepoInput
+let syncReleaseData
+let syncReleases
+let ManagedCollectionWriteError
+let FramerPluginError
+let repo
 
-const repo = parseRepoInput("https://github.com/example/project")
+before(async () => {
+    const github = await jiti.import("./src/github.ts")
+    const framer = await import("@framer/plugin")
+    fetchGitHubReleases = github.fetchGitHubReleases
+    parseRepoInput = github.parseRepoInput
+    syncReleaseData = github.syncReleaseData
+    syncReleases = github.syncReleases
+    ManagedCollectionWriteError = github.ManagedCollectionWriteError
+    FramerPluginError = framer.FramerPluginError
+    repo = parseRepoInput("https://github.com/example/project")
+})
 
 test("saved collections keep new fields disabled until configured", () => {
     const legacyFields = createDefaultFieldConfigs()
@@ -129,4 +145,48 @@ test("an empty release list cannot clear a collection", async () => {
 
     await assert.rejects(syncReleaseData(collection, repo, []), /No releases found/)
     assert.deepEqual(calls, [])
+})
+
+for (const failedOperation of ["setFields", "addItems", "removeItems", "setPluginData"]) {
+    test(`a permission failure in ${failedOperation} identifies the failed write and stops sync`, async () => {
+        const calls = []
+        const denial = new FramerPluginError("Insufficient permissions")
+        const record = (operation, value) => {
+            calls.push(operation)
+            if (operation === failedOperation) throw denial
+            return value
+        }
+        const collection = {
+            setFields: () => record("setFields"),
+            getItemIds: () => record("getItemIds", ["old-release"]),
+            addItems: () => record("addItems"),
+            removeItems: () => record("removeItems"),
+            setPluginData: () => record("setPluginData"),
+        }
+
+        await assert.rejects(syncReleaseData(collection, repo, [{ id: 1, tag_name: "v1" }]), error => {
+            assert.ok(error instanceof ManagedCollectionWriteError)
+            assert.equal(error.cause, denial)
+            assert.match(error.message, /Framer denied permission/)
+            assert.match(error.message, /Check your CMS access/)
+            return true
+        })
+        assert.equal(calls.at(-1), failedOperation)
+        assert.equal(calls.filter(call => call === failedOperation).length, 1)
+    })
+}
+
+test("a non-permission collection API failure identifies the failed operation", async () => {
+    const collection = {
+        setFields: () => {
+            throw new Error("API unavailable")
+        },
+    }
+
+    await assert.rejects(syncReleaseData(collection, repo, [{ id: 1, tag_name: "v1" }]), error => {
+        assert.ok(error instanceof ManagedCollectionWriteError)
+        assert.match(error.message, /Could not update collection fields/)
+        assert.equal(error.cause.message, "API unavailable")
+        return true
+    })
 })
