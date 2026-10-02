@@ -92,6 +92,7 @@ The UI shows friendly errors for:
 - Private or unreadable repositories
 - Repositories with no releases
 - GitHub API rate limits
+- GitHub requests that do not respond within 20 seconds
 - Unexpected GitHub API responses
 
 Unauthenticated GitHub API rate limits are acceptable for manual sync, but repeated heavy usage can hit GitHub's limit.

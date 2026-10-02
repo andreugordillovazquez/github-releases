@@ -85,6 +85,38 @@ test("a failed later page leaves the collection untouched", async () => {
     }
 })
 
+test("a stalled GitHub request times out before changing the collection", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] })
+    const originalFetch = global.fetch
+    const calls = []
+    let requestAborted = false
+    global.fetch = (_url, { signal }) =>
+        new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () => {
+                requestAborted = true
+                reject(new DOMException("The operation was aborted.", "AbortError"))
+            })
+        })
+    const collection = {
+        setFields: () => calls.push("setFields"),
+        getItemIds: () => calls.push("getItemIds"),
+        addItems: () => calls.push("addItems"),
+        removeItems: () => calls.push("removeItems"),
+        setPluginData: () => calls.push("setPluginData"),
+    }
+
+    try {
+        const sync = syncReleases(collection, repo.url)
+        t.mock.timers.tick(20_000)
+        await assert.rejects(sync, /GitHub did not respond in time/)
+        assert.equal(requestAborted, true)
+        assert.deepEqual(calls, [])
+    } finally {
+        global.fetch = originalFetch
+        t.mock.timers.reset()
+    }
+})
+
 test("an empty release list cannot clear a collection", async () => {
     const calls = []
     const collection = {

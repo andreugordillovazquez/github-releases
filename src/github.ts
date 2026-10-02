@@ -34,9 +34,17 @@ export const SYNC_METHODS = [
 
 const repoPartPattern = /^[A-Za-z0-9_.-]+$/
 const githubReleasePageSize = 100
+const githubRequestTimeoutMs = 20_000
 const maxSlugLength = 64
 const maxSummaryLength = 180
 const defaultSlugStrategy: SlugStrategy = "repository-tag"
+
+export class GitHubRequestTimeoutError extends Error {
+    constructor(cause: unknown) {
+        super("GitHub did not respond in time. Check your connection and try again.", { cause })
+        this.name = "GitHubRequestTimeoutError"
+    }
+}
 
 export type SlugStrategy = "repository-tag" | "repository-short-hash"
 
@@ -134,24 +142,40 @@ export async function fetchGitHubReleases(repo: RepoInfo, abortSignal?: AbortSig
         }
         fetchedUrls.add(nextUrl)
 
-        const response = await fetch(nextUrl, {
-            headers: {
-                Accept: "application/vnd.github+json",
-            },
-            signal: abortSignal,
-        })
+        const controller = new AbortController()
+        const abortRequest = () => controller.abort()
+        if (abortSignal?.aborted) abortRequest()
+        else abortSignal?.addEventListener("abort", abortRequest, { once: true })
+        const timeout = setTimeout(abortRequest, githubRequestTimeoutMs)
 
-        if (!response.ok) {
-            throw await createGitHubError(response, repo)
+        try {
+            const response = await fetch(nextUrl, {
+                headers: {
+                    Accept: "application/vnd.github+json",
+                },
+                signal: controller.signal,
+            })
+
+            if (!response.ok) {
+                throw await createGitHubError(response, repo)
+            }
+
+            const page = (await response.json()) as unknown
+            if (!Array.isArray(page)) {
+                throw new Error("GitHub returned an unexpected releases response.")
+            }
+
+            releases.push(...(page as GitHubRelease[]))
+            nextUrl = getNextPageUrl(response.headers.get("Link"))
+        } catch (error) {
+            if (controller.signal.aborted && !abortSignal?.aborted) {
+                throw new GitHubRequestTimeoutError(error)
+            }
+            throw error
+        } finally {
+            clearTimeout(timeout)
+            abortSignal?.removeEventListener("abort", abortRequest)
         }
-
-        const page = (await response.json()) as unknown
-        if (!Array.isArray(page)) {
-            throw new Error("GitHub returned an unexpected releases response.")
-        }
-
-        releases.push(...(page as GitHubRelease[]))
-        nextUrl = getNextPageUrl(response.headers.get("Link"))
     }
 
     return releases
