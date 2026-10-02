@@ -1,11 +1,13 @@
 import DOMPurify from "dompurify"
 import {
+    FramerPluginClosedError,
+    FramerPluginError,
     type FieldDataEntryInput,
     type FieldDataInput,
     type ManagedCollection,
     type ManagedCollectionItemInput,
     type ProtectedMethod,
-} from "framer-plugin"
+} from "@framer/plugin"
 import { marked } from "marked"
 import {
     configureReleasesCollection,
@@ -34,9 +36,28 @@ export const SYNC_METHODS = [
 
 const repoPartPattern = /^[A-Za-z0-9_.-]+$/
 const githubReleasePageSize = 100
-const maxReleasePages = 10
+const githubRequestTimeoutMs = 20_000
 const maxSlugLength = 64
+const maxSummaryLength = 180
 const defaultSlugStrategy: SlugStrategy = "repository-tag"
+
+export class GitHubRequestTimeoutError extends Error {
+    constructor(cause: unknown) {
+        super("GitHub did not respond in time. Check your connection and try again.", { cause })
+        this.name = "GitHubRequestTimeoutError"
+    }
+}
+
+export class ManagedCollectionWriteError extends Error {
+    constructor(operation: string, cause: unknown) {
+        const message =
+            cause instanceof FramerPluginError
+                ? `Framer denied permission to ${operation}. Check your CMS access and try syncing again.`
+                : `Could not ${operation} in this CMS collection. Try syncing again.`
+        super(message, { cause })
+        this.name = "ManagedCollectionWriteError"
+    }
+}
 
 export type SlugStrategy = "repository-tag" | "repository-short-hash"
 
@@ -57,6 +78,16 @@ interface GitHubUser {
     avatar_url?: unknown
 }
 
+interface GitHubReleaseAsset {
+    browser_download_url?: unknown
+    name?: unknown
+    label?: unknown
+    state?: unknown
+    size?: unknown
+    download_count?: unknown
+    digest?: unknown
+}
+
 export interface GitHubRelease {
     id?: unknown
     tag_name?: unknown
@@ -66,6 +97,12 @@ export interface GitHubRelease {
     prerelease?: unknown
     published_at?: unknown
     html_url?: unknown
+    discussion_url?: unknown
+    zipball_url?: unknown
+    tarball_url?: unknown
+    target_commitish?: unknown
+    immutable?: unknown
+    assets?: unknown
     author?: GitHubUser | null
 }
 
@@ -105,31 +142,53 @@ export function parseRepoInput(input: string): RepoInfo {
 
 export async function fetchGitHubReleases(repo: RepoInfo, abortSignal?: AbortSignal): Promise<GitHubRelease[]> {
     const releases: GitHubRelease[] = []
-    let nextUrl: string | null =
-        `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/releases` +
-        `?per_page=${githubReleasePageSize}`
-    let pagesFetched = 0
+    const releasesPath = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/releases`
+    let nextUrl: string | null = `https://api.github.com${releasesPath}?per_page=${githubReleasePageSize}`
+    const fetchedUrls = new Set<string>()
 
-    while (nextUrl && pagesFetched < maxReleasePages) {
-        const response = await fetch(nextUrl, {
-            headers: {
-                Accept: "application/vnd.github+json",
-            },
-            signal: abortSignal,
-        })
-
-        if (!response.ok) {
-            throw await createGitHubError(response, repo)
+    while (nextUrl) {
+        const pageUrl = new URL(nextUrl)
+        const isReleasePage =
+            pageUrl.pathname === releasesPath || /^\/repositories\/\d+\/releases$/u.test(pageUrl.pathname)
+        if (pageUrl.origin !== "https://api.github.com" || !isReleasePage || fetchedUrls.has(nextUrl)) {
+            throw new Error("GitHub returned an unexpected releases page. No collection items were changed.")
         }
+        fetchedUrls.add(nextUrl)
 
-        const page = (await response.json()) as unknown
-        if (!Array.isArray(page)) {
-            throw new Error("GitHub returned an unexpected releases response.")
+        const controller = new AbortController()
+        const abortRequest = () => controller.abort()
+        if (abortSignal?.aborted) abortRequest()
+        else abortSignal?.addEventListener("abort", abortRequest, { once: true })
+        const timeout = setTimeout(abortRequest, githubRequestTimeoutMs)
+
+        try {
+            const response = await fetch(nextUrl, {
+                headers: {
+                    Accept: "application/vnd.github+json",
+                },
+                signal: controller.signal,
+            })
+
+            if (!response.ok) {
+                throw await createGitHubError(response, repo)
+            }
+
+            const page = (await response.json()) as unknown
+            if (!Array.isArray(page)) {
+                throw new Error("GitHub returned an unexpected releases response.")
+            }
+
+            releases.push(...(page as GitHubRelease[]))
+            nextUrl = getNextPageUrl(response.headers.get("Link"))
+        } catch (error) {
+            if (controller.signal.aborted && !abortSignal?.aborted) {
+                throw new GitHubRequestTimeoutError(error)
+            }
+            throw error
+        } finally {
+            clearTimeout(timeout)
+            abortSignal?.removeEventListener("abort", abortRequest)
         }
-
-        releases.push(...(page as GitHubRelease[]))
-        nextUrl = getNextPageUrl(response.headers.get("Link"))
-        pagesFetched += 1
     }
 
     return releases
@@ -154,7 +213,11 @@ export async function syncReleaseData(
     fieldConfigs: readonly ReleaseFieldConfig[] = createDefaultFieldConfigs(),
     slugStrategy: SlugStrategy = defaultSlugStrategy
 ): Promise<SyncResult> {
-    await configureReleasesCollection(collection, fieldConfigs)
+    if (releases.length === 0) {
+        throw new Error(`No releases found for ${repo.fullName}. No collection items were changed.`)
+    }
+
+    await writeCollection("update collection fields", () => configureReleasesCollection(collection, fieldConfigs))
     const existingItemIds = new Set(await collection.getItemIds())
     const usedSlugs = new Set<string>()
     const latestReleaseId = releases.find(release => !release.draft && !release.prerelease)?.id
@@ -173,19 +236,38 @@ export async function syncReleaseData(
         return item
     })
 
-    await collection.addItems(items)
-    await collection.removeItems(Array.from(existingItemIds))
+    await writeCollection("add release items", () => collection.addItems(items))
+    await writeCollection("remove outdated release items", () => collection.removeItems(Array.from(existingItemIds)))
 
-    await collection.setPluginData(PLUGIN_DATA_KEYS.REPO_URL, repo.url)
-    await collection.setPluginData(PLUGIN_DATA_KEYS.REPO_FULL_NAME, repo.fullName)
-    await collection.setPluginData(PLUGIN_DATA_KEYS.FIELD_CONFIGS, serializeFieldConfigs(fieldConfigs))
-    await collection.setPluginData(PLUGIN_DATA_KEYS.SLUG_STRATEGY, slugStrategy)
-    await collection.setPluginData(PLUGIN_DATA_KEYS.LAST_SYNCED_AT, new Date().toISOString())
-    await collection.setPluginData(PLUGIN_DATA_KEYS.LAST_RELEASE_COUNT, String(releases.length))
+    await writeCollection("save the repository URL", () => collection.setPluginData(PLUGIN_DATA_KEYS.REPO_URL, repo.url))
+    await writeCollection("save the repository name", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.REPO_FULL_NAME, repo.fullName)
+    )
+    await writeCollection("save field settings", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.FIELD_CONFIGS, serializeFieldConfigs(fieldConfigs))
+    )
+    await writeCollection("save the slug setting", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.SLUG_STRATEGY, slugStrategy)
+    )
+    await writeCollection("save the last sync time", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.LAST_SYNCED_AT, new Date().toISOString())
+    )
+    await writeCollection("save the release count", () =>
+        collection.setPluginData(PLUGIN_DATA_KEYS.LAST_RELEASE_COUNT, String(releases.length))
+    )
 
     return {
         repo,
         releaseCount: releases.length,
+    }
+}
+
+async function writeCollection(operation: string, write: () => Promise<unknown>): Promise<void> {
+    try {
+        await write()
+    } catch (error) {
+        if (error instanceof FramerPluginClosedError) throw error
+        throw new ManagedCollectionWriteError(operation, error)
     }
 }
 
@@ -206,6 +288,7 @@ function mapReleaseToItem(release: GitHubRelease, options: ReleaseMappingOptions
     const authorName = readString(author?.login)
     const authorAvatar = readString(author?.avatar_url)
     const body = markdownToHtml(readString(release.body))
+    const assets = readUploadedAssets(release.assets)
     const publishedAt = readString(release.published_at)
     const githubUrl = readString(release.html_url)
     const isDraft = Boolean(release.draft)
@@ -213,14 +296,24 @@ function mapReleaseToItem(release: GitHubRelease, options: ReleaseMappingOptions
     const values: ReleaseFieldValues = {
         [FIELD_IDS.title]: title,
         [FIELD_IDS.tag]: tag,
+        [FIELD_IDS.summary]: htmlToSummary(body),
         [FIELD_IDS.body]: body,
         [FIELD_IDS.publishedAt]: publishedAt || null,
         [FIELD_IDS.isLatest]: options.isLatest,
         [FIELD_IDS.isPrerelease]: Boolean(release.prerelease),
+        [FIELD_IDS.downloads]: assets ? assetsToHtml(assets) : "",
+        [FIELD_IDS.totalDownloads]: assets
+            ? assets.reduce((total, asset) => total + readNonnegativeNumber(asset.download_count), 0)
+            : null,
+        [FIELD_IDS.discussionUrl]: readGitHubUrl(release.discussion_url),
+        [FIELD_IDS.sourceZipUrl]: readGitHubUrl(release.zipball_url),
+        [FIELD_IDS.sourceTarUrl]: readGitHubUrl(release.tarball_url),
         [FIELD_IDS.compareUrl]: options.compareUrl,
         [FIELD_IDS.githubUrl]: githubUrl || null,
         [FIELD_IDS.author]: authorName,
         [FIELD_IDS.authorAvatar]: authorAvatar || null,
+        [FIELD_IDS.targetCommitish]: readString(release.target_commitish),
+        [FIELD_IDS.isImmutable]: typeof release.immutable === "boolean" ? release.immutable : null,
     }
 
     return {
@@ -236,7 +329,7 @@ export function parseSlugStrategy(value: string | null): SlugStrategy {
     return defaultSlugStrategy
 }
 
-type ReleaseFieldValue = string | boolean | null
+type ReleaseFieldValue = string | boolean | number | null
 type ReleaseFieldValues = Record<ReleaseFieldId, ReleaseFieldValue>
 
 function buildFieldData(
@@ -270,7 +363,11 @@ function buildFieldDataEntry(
         case "date":
             return { type: "date", value: typeof value === "string" ? value : null }
         case "formattedText":
-            return { type: "formattedText", value: typeof value === "string" ? value : "" }
+            return {
+                type: "formattedText",
+                value: typeof value === "string" ? value : "",
+                contentType: "html",
+            }
         case "image":
             return {
                 type: "image",
@@ -279,6 +376,8 @@ function buildFieldDataEntry(
             }
         case "link":
             return { type: "link", value: typeof value === "string" && value ? value : null }
+        case "number":
+            return typeof value === "number" ? { type: "number", value } : undefined
         case "string":
             return { type: "string", value: stringifyValue(value) }
     }
@@ -296,6 +395,87 @@ function markdownToHtml(markdown: string): string {
     return DOMPurify.sanitize(html)
 }
 
+function htmlToSummary(html: string): string {
+    if (!html) return ""
+
+    const text = new DOMParser().parseFromString(html, "text/html").body.textContent?.replace(/\s+/gu, " ").trim() ?? ""
+    if (text.length <= maxSummaryLength) return text
+
+    const lastSpace = text.lastIndexOf(" ", maxSummaryLength)
+    return `${text.slice(0, lastSpace > maxSummaryLength / 2 ? lastSpace : maxSummaryLength).trimEnd()}…`
+}
+
+function readUploadedAssets(value: unknown): GitHubReleaseAsset[] | null {
+    if (!Array.isArray(value)) return null
+    return (value as GitHubReleaseAsset[]).filter(
+        asset => asset && (asset.state === undefined || asset.state === "uploaded")
+    )
+}
+
+function assetsToHtml(assets: readonly GitHubReleaseAsset[]): string {
+    const items = assets.flatMap(asset => {
+        const url = readGitHubUrl(asset.browser_download_url)
+        if (!url) return []
+
+        const name = readString(asset.label) || readString(asset.name) || "Download"
+        const details = [
+            readAssetSize(asset.size),
+            typeof asset.download_count === "number" &&
+            Number.isFinite(asset.download_count) &&
+            asset.download_count >= 0
+                ? `${asset.download_count.toLocaleString("en-US")} downloads`
+                : "",
+        ].filter(Boolean)
+        const digest = readString(asset.digest)
+        const metadata = details.length ? ` <small>(${escapeHtml(details.join(" · "))})</small>` : ""
+        const checksum = digest ? ` <code>${escapeHtml(digest)}</code>` : ""
+        return [`<li><a href="${escapeHtml(url)}">${escapeHtml(name)}</a>${metadata}${checksum}</li>`]
+    })
+
+    return items.length ? DOMPurify.sanitize(`<ul>${items.join("")}</ul>`) : ""
+}
+
+function readAssetSize(value: unknown): string {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return ""
+    if (value < 1024) return `${value} B`
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`
+    return `${(value / (1024 * 1024)).toFixed(1)} MiB`
+}
+
+function readNonnegativeNumber(value: unknown): number {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0
+}
+
+function readGitHubUrl(value: unknown): string | null {
+    if (typeof value !== "string") return null
+
+    try {
+        const url = new URL(value)
+        return url.protocol === "https:" && (url.hostname === "github.com" || url.hostname === "api.github.com")
+            ? url.toString()
+            : null
+    } catch {
+        return null
+    }
+}
+
+function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/gu, character => {
+        switch (character) {
+            case "&":
+                return "&amp;"
+            case "<":
+                return "&lt;"
+            case ">":
+                return "&gt;"
+            case '"':
+                return "&quot;"
+            default:
+                return "&#39;"
+        }
+    })
+}
+
 function readReleaseId(release: GitHubRelease): string {
     const id = release.id
     if (typeof id === "number" || typeof id === "string") {
@@ -311,6 +491,7 @@ function readString(value: unknown): string {
 
 function stringifyValue(value: ReleaseFieldValue): string {
     if (typeof value === "boolean") return value ? "Yes" : "No"
+    if (typeof value === "number") return String(value)
     return value ?? ""
 }
 

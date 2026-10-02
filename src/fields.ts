@@ -1,21 +1,29 @@
-import type { ManagedCollection, ManagedCollectionFieldInput } from "framer-plugin"
+import type { ManagedCollection, ManagedCollectionFieldInput } from "@framer/plugin"
 
 export const FIELD_IDS = {
     title: "title",
     tag: "tag",
+    summary: "summary",
     body: "body",
     publishedAt: "published_at",
     isLatest: "is_latest",
     isPrerelease: "is_prerelease",
+    downloads: "downloads",
+    totalDownloads: "total_downloads",
+    discussionUrl: "discussion_url",
+    sourceZipUrl: "source_zip_url",
+    sourceTarUrl: "source_tar_url",
     compareUrl: "compare_url",
     githubUrl: "github_url",
     author: "author",
     authorAvatar: "author_avatar",
+    targetCommitish: "target_commitish",
+    isImmutable: "is_immutable",
 } as const
 
 export type ReleaseFieldId = (typeof FIELD_IDS)[keyof typeof FIELD_IDS]
 
-export type ConfigurableFieldType = "boolean" | "date" | "formattedText" | "image" | "link" | "string"
+export type ConfigurableFieldType = "boolean" | "date" | "formattedText" | "image" | "link" | "number" | "string"
 
 export interface ReleaseFieldConfig {
     id: ReleaseFieldId
@@ -37,6 +45,13 @@ export const DEFAULT_FIELD_CONFIGS = [
         id: FIELD_IDS.tag,
         sourceName: "Tag",
         name: "Tag",
+        type: "string",
+        enabled: true,
+    },
+    {
+        id: FIELD_IDS.summary,
+        sourceName: "Summary",
+        name: "Summary",
         type: "string",
         enabled: true,
     },
@@ -69,6 +84,41 @@ export const DEFAULT_FIELD_CONFIGS = [
         enabled: true,
     },
     {
+        id: FIELD_IDS.downloads,
+        sourceName: "Downloads",
+        name: "Downloads",
+        type: "formattedText",
+        enabled: true,
+    },
+    {
+        id: FIELD_IDS.totalDownloads,
+        sourceName: "Total Downloads",
+        name: "Total Downloads",
+        type: "number",
+        enabled: true,
+    },
+    {
+        id: FIELD_IDS.discussionUrl,
+        sourceName: "Discussion URL",
+        name: "Discussion URL",
+        type: "link",
+        enabled: true,
+    },
+    {
+        id: FIELD_IDS.sourceZipUrl,
+        sourceName: "Source ZIP URL",
+        name: "Source ZIP URL",
+        type: "link",
+        enabled: true,
+    },
+    {
+        id: FIELD_IDS.sourceTarUrl,
+        sourceName: "Source TAR URL",
+        name: "Source TAR URL",
+        type: "link",
+        enabled: true,
+    },
+    {
         id: FIELD_IDS.compareUrl,
         sourceName: "Compare URL",
         name: "Compare URL",
@@ -95,6 +145,20 @@ export const DEFAULT_FIELD_CONFIGS = [
         name: "Author Avatar",
         type: "image",
         enabled: true,
+    },
+    {
+        id: FIELD_IDS.targetCommitish,
+        sourceName: "Target Commitish",
+        name: "Target Commitish",
+        type: "string",
+        enabled: false,
+    },
+    {
+        id: FIELD_IDS.isImmutable,
+        sourceName: "Is Immutable",
+        name: "Is Immutable",
+        type: "boolean",
+        enabled: false,
     },
 ] as const satisfies readonly ReleaseFieldConfig[]
 
@@ -149,7 +213,8 @@ export function parseFieldConfigs(value: string | null): ReleaseFieldConfig[] {
 
         return defaults.map(defaultConfig => {
             const savedField = savedFields.get(defaultConfig.id)
-            if (!savedField) return defaultConfig
+            // Existing collections keep their chosen schema when new optional fields are added.
+            if (!savedField) return { ...defaultConfig, enabled: defaultConfig.id === FIELD_IDS.title }
 
             const [, name, enabled] = savedField
 

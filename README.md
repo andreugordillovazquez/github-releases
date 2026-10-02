@@ -33,20 +33,30 @@ Before syncing, you can choose which fields to create and rename them to match y
 
 The plugin configures these stable field IDs:
 
-| Field ID        | Name          | Type          |
-| --------------- | ------------- | ------------- |
-| `title`         | Title         | string        |
-| `tag`           | Tag           | string        |
-| `body`          | Body          | formattedText |
-| `published_at`  | Published At  | date          |
-| `is_latest`     | Is Latest     | boolean       |
-| `is_prerelease` | Is Prerelease | boolean       |
-| `compare_url`   | Compare URL   | link          |
-| `github_url`    | GitHub URL    | link          |
-| `author`        | Author        | string        |
-| `author_avatar` | Author Avatar | image         |
+| Field ID           | Name             | Type          |
+| ------------------ | ---------------- | ------------- |
+| `title`            | Title            | string        |
+| `tag`              | Tag              | string        |
+| `summary`          | Summary          | string        |
+| `body`             | Body             | formattedText |
+| `published_at`     | Published At     | date          |
+| `is_latest`        | Is Latest        | boolean       |
+| `is_prerelease`    | Is Prerelease    | boolean       |
+| `downloads`        | Downloads        | formattedText |
+| `total_downloads`  | Total Downloads  | number        |
+| `discussion_url`   | Discussion URL   | link          |
+| `source_zip_url`   | Source ZIP URL   | link          |
+| `source_tar_url`   | Source TAR URL   | link          |
+| `compare_url`      | Compare URL      | link          |
+| `github_url`       | GitHub URL       | link          |
+| `author`           | Author           | string        |
+| `author_avatar`    | Author Avatar    | image         |
+| `target_commitish` | Target Commitish | string        |
+| `is_immutable`     | Is Immutable     | boolean       |
 
 The configure screen lets you rename fields and disable optional fields. Field types are fixed by the GitHub release schema, matching the CMS starter mapping pattern. Field IDs stay stable so repeat syncs update the same CMS fields.
+
+`summary` is a short plain-text excerpt of the release notes. `downloads` contains links to uploaded assets, with any available size, download count, and digest. `total_downloads` sums the asset download counts. GitHub only provides `discussion_url` when a discussion is linked to the release. Target Commitish and Is Immutable are available but disabled by default. Collections configured before these fields were added keep their existing field choices until you enable the new fields in the configure screen.
 
 ## Slugs
 
@@ -65,8 +75,10 @@ GitHub's releases API returns the releases currently available for the repositor
 - Later syncs upsert by GitHub `release.id`, so existing items update instead of duplicating.
 - New releases are added.
 - Releases that no longer appear in the GitHub API response are removed from the managed collection.
+- The plugin follows every GitHub pagination link before changing the collection. A failed or incomplete fetch does not remove older items.
 
 Draft releases are normally not returned for public unauthenticated API requests. If GitHub returns a draft release, the plugin marks the CMS item as draft.
+An empty release list stops the sync without removing the existing collection items.
 
 ## Markdown
 
@@ -80,6 +92,7 @@ The UI shows friendly errors for:
 - Private or unreadable repositories
 - Repositories with no releases
 - GitHub API rate limits
+- GitHub requests that do not respond within 20 seconds
 - Unexpected GitHub API responses
 
 Unauthenticated GitHub API rate limits are acceptable for manual sync, but repeated heavy usage can hit GitHub's limit.
@@ -91,4 +104,5 @@ npm run dev
 npm run check
 npm run build
 npm run pack
+node --test tests/github.test.cjs
 ```
